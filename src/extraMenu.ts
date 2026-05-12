@@ -1,4 +1,4 @@
-import type { ExtraCleaner } from "./extraCleaner";
+import type { ExtraCleaner, ExtraCleanProgress } from "./extraCleaner";
 import type { ExtraFieldDefinition } from "./extraParser";
 
 const TOOL_MENU_ID = "tools-extra-columns";
@@ -140,7 +140,20 @@ export class ExtraMenu {
       return;
     }
 
-    const result = await this.cleaner.clean(definition.canonicalKey);
+    const progressWindow = createCleanProgressWindow(
+      context,
+      this.menuIconURL,
+      definition.label,
+      preview.itemsChanged,
+    );
+
+    const result = await this.cleaner
+      .clean(definition.canonicalKey, progressWindow.update)
+      .catch((error) => {
+        progressWindow.fail(errorMessage(error));
+        throw error;
+      });
+    progressWindow.finish(result.failedItems.length);
     await this.refreshFields();
     Zotero.ItemTreeManager.refreshColumns();
 
@@ -155,6 +168,56 @@ export class ExtraMenu {
       ),
     );
   }
+}
+
+interface CleanProgressWindow {
+  update(progress: ExtraCleanProgress): void;
+  finish(failedItems: number): void;
+  fail(detail: string): void;
+}
+
+function createCleanProgressWindow(
+  context: AnyMenuContext,
+  iconURL: string,
+  label: string,
+  totalItems: number,
+): CleanProgressWindow {
+  const win = new Zotero.ProgressWindow({
+    window: getWindow(context),
+    closeOnClick: true,
+  });
+  win.changeHeadline(message("progressHeadline", label), iconURL);
+  const line = new win.ItemProgress(
+    iconURL,
+    message("progressLine", 0, totalItems),
+  );
+  line.setProgress(0);
+  win.show();
+
+  return {
+    update(progress) {
+      const total = progress.totalItems || totalItems;
+      const percent =
+        total > 0 ? Math.floor((progress.processedItems / total) * 100) : 100;
+      line.setText(message("progressLine", progress.processedItems, total));
+      line.setProgress(Math.min(100, Math.max(0, percent)));
+    },
+    finish(failedItems) {
+      if (failedItems > 0) {
+        line.setText(message("progressDoneWithFailures", failedItems));
+        line.setError();
+      } else {
+        line.setText(message("progressDone"));
+        line.setProgress(100);
+      }
+      win.startCloseTimer(4000);
+    },
+    fail(detail) {
+      line.setText(message("progressFailed", detail));
+      line.setError();
+      win.startCloseTimer(8000);
+    },
+  };
 }
 
 function setMenuLabel(context: AnyMenuContext, label: string): void {
@@ -208,6 +271,11 @@ function errorMessage(error: unknown): string {
 }
 
 function message(key: "nothingToClean", label: string): string;
+function message(key: "progressHeadline", label: string): string;
+function message(key: "progressLine", processed: number, total: number): string;
+function message(key: "progressDone"): string;
+function message(key: "progressDoneWithFailures", failedItems: number): string;
+function message(key: "progressFailed", detail: string): string;
 function message(
   key: "confirmClean",
   label: string,
@@ -228,6 +296,25 @@ function message(key: string, ...args: Array<number | string>): string {
     return zh
       ? `没有找到可清理的「${args[0]}」字段。`
       : `No removable "${args[0]}" fields were found.`;
+  }
+  if (key === "progressHeadline") {
+    return zh ? `正在清理「${args[0]}」` : `Cleaning "${args[0]}"`;
+  }
+  if (key === "progressLine") {
+    return zh
+      ? `已处理 ${args[0]} / ${args[1]} 个条目`
+      : `Processed ${args[0]} of ${args[1]} items`;
+  }
+  if (key === "progressDone") {
+    return zh ? "清理完成" : "Cleanup complete";
+  }
+  if (key === "progressDoneWithFailures") {
+    return zh
+      ? `清理完成，${args[0]} 个条目失败`
+      : `Cleanup complete with ${args[0]} failures`;
+  }
+  if (key === "progressFailed") {
+    return zh ? `清理失败：${args[0]}` : `Cleanup failed: ${args[0]}`;
   }
   if (key === "confirmClean") {
     return zh

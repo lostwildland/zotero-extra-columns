@@ -14,4 +14,15 @@ describe("extraLinks", function () {
       "https://doi.org/10.48550/ARXIV.2605.03210",
     );
   });
+
+  it("links external protocol URLs", function () {
+    const [entry] = parseExtraFields(
+      "Post Newsletter: obsidian://open?vault=insight&file=area%2Fneuritis%2Fnewsletter-2026-05-12",
+    );
+
+    assert.equal(
+      linkForExtraEntry(entry),
+      "obsidian://open?vault=insight&file=area%2Fneuritis%2Fnewsletter-2026-05-12",
+    );
+  });
 });

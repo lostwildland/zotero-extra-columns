@@ -9,9 +9,22 @@ export interface ExtraCleanResult extends ExtraCleanPreview {
   failedItems: number[];
 }
 
+export interface ExtraCleanProgress {
+  processedItems: number;
+  totalItems: number;
+  itemsChanged: number;
+  linesRemoved: number;
+  failedItems: number;
+}
+
 interface ExtraRow {
   itemID: number;
   extra: string;
+}
+
+interface ExtraCleanCandidate {
+  row: ExtraRow;
+  removal: ReturnType<typeof removeExtraFieldLines>;
 }
 
 export class ExtraCleaner {
@@ -31,29 +44,54 @@ export class ExtraCleaner {
     return { itemsChanged, linesRemoved };
   }
 
-  async clean(canonicalKey: string): Promise<ExtraCleanResult> {
+  async clean(
+    canonicalKey: string,
+    onProgress?: (progress: ExtraCleanProgress) => void,
+  ): Promise<ExtraCleanResult> {
     const rows = await this.getExtraRows();
-    let itemsChanged = 0;
-    let linesRemoved = 0;
-    const failedItems: number[] = [];
+    const candidates: ExtraCleanCandidate[] = [];
 
     for (const row of rows) {
       const removal = removeExtraFieldLines(row.extra, canonicalKey);
-      if (removal.removed === 0) {
-        continue;
+      if (removal.removed > 0) {
+        candidates.push({ row, removal });
       }
+    }
 
+    let itemsChanged = 0;
+    let linesRemoved = 0;
+    const failedItems: number[] = [];
+    let processedItems = 0;
+
+    emitProgress(onProgress, {
+      processedItems,
+      totalItems: candidates.length,
+      itemsChanged,
+      linesRemoved,
+      failedItems: failedItems.length,
+    });
+
+    for (const candidate of candidates) {
       try {
-        const item = await Zotero.Items.getAsync(row.itemID);
-        item.setField("extra", removal.extra);
+        const item = await Zotero.Items.getAsync(candidate.row.itemID);
+        item.setField("extra", candidate.removal.extra);
         await item.saveTx();
         itemsChanged += 1;
-        linesRemoved += removal.removed;
+        linesRemoved += candidate.removal.removed;
       } catch (error) {
-        failedItems.push(row.itemID);
+        failedItems.push(candidate.row.itemID);
         Zotero.logError(
           error instanceof Error ? error : new Error(String(error)),
         );
+      } finally {
+        processedItems += 1;
+        emitProgress(onProgress, {
+          processedItems,
+          totalItems: candidates.length,
+          itemsChanged,
+          linesRemoved,
+          failedItems: failedItems.length,
+        });
       }
     }
 
@@ -76,5 +114,19 @@ export class ExtraCleaner {
       extra:
         typeof row.value === "string" ? row.value : String(row.value || ""),
     }));
+  }
+}
+
+function emitProgress(
+  onProgress: ((progress: ExtraCleanProgress) => void) | undefined,
+  progress: ExtraCleanProgress,
+): void {
+  if (!onProgress) {
+    return;
+  }
+  try {
+    onProgress(progress);
+  } catch (error) {
+    Zotero.logError(error instanceof Error ? error : new Error(String(error)));
   }
 }

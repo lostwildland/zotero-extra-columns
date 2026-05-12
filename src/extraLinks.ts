@@ -2,7 +2,7 @@ import type { ExtraEntry } from "./extraParser";
 
 export function linkForExtraEntry(entry: ExtraEntry): string | null {
   const value = entry.value.trim();
-  if (/^https?:\/\//i.test(value)) {
+  if (isExternalURL(value)) {
     return value;
   }
 
@@ -18,6 +18,10 @@ export function linkForExtraEntry(entry: ExtraEntry): string | null {
   }
 
   return null;
+}
+
+function isExternalURL(value: string): boolean {
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(value);
 }
 
 function stripDOIPrefix(value: string): string {
