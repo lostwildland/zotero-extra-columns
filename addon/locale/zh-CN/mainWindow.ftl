@@ -1,0 +1,12 @@
+extra-columns-section-head =
+    .label = Extra 字段
+extra-columns-section-sidenav =
+    .tooltiptext = Extra 字段
+extra-columns-menu-root =
+    .label = Extra Columns
+extra-columns-menu-clean =
+    .label = 清理 Extra 字段
+extra-columns-menu-no-fields =
+    .label = 没有可清理字段
+extra-columns-menu-clean-item =
+    .label = 删除 { $label }（{ $count }）

@@ -1,0 +1,12 @@
+extra-columns-section-head =
+    .label = Extra Fields
+extra-columns-section-sidenav =
+    .tooltiptext = Extra Fields
+extra-columns-menu-root =
+    .label = Extra Columns
+extra-columns-menu-clean =
+    .label = Clean Extra Field
+extra-columns-menu-no-fields =
+    .label = No Extra fields found
+extra-columns-menu-clean-item =
+    .label = Remove { $label } ({ $count })

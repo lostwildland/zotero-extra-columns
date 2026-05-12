@@ -1,0 +1,14 @@
+node_modules/
+.scaffold/
+build/
+.env
+*.xpi
+*.zip
+*.log
+tsconfig.tsbuildinfo
+.DS_Store
+
+# Local planning/research notes from agent-assisted development
+task_plan.md
+findings.md
+progress.md

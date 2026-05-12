@@ -1,0 +1,60 @@
+{
+  "name": "zotero-extra-columns",
+  "type": "module",
+  "version": "1.0.0",
+  "description": "Expose arbitrary Zotero Extra metadata as native item-tree columns and item-pane fields.",
+  "config": {
+    "addonName": "Extra Columns",
+    "addonID": "extra-columns@lostwildland.dev",
+    "addonRef": "extracolumns",
+    "addonInstance": "ExtraColumns",
+    "prefsPrefix": "extensions.zotero.extracolumns"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lostwildland/zotero-extra-columns.git"
+  },
+  "author": "Lost Wildland",
+  "bugs": {
+    "url": "https://github.com/lostwildland/zotero-extra-columns/issues"
+  },
+  "homepage": "https://github.com/lostwildland/zotero-extra-columns#readme",
+  "license": "AGPL-3.0-or-later",
+  "engines": {
+    "node": ">=22.8.0"
+  },
+  "scripts": {
+    "build": "zotero-plugin build && tsc --noEmit",
+    "build:xpi": "npm run build && mkdir -p build && cp .scaffold/build/*.xpi build/",
+    "lint:check": "prettier --check . && eslint .",
+    "lint:fix": "prettier --write . && eslint . --fix",
+    "release": "zotero-plugin release",
+    "serve": "zotero-plugin serve",
+    "start": "npm run serve",
+    "test": "mocha --require jiti/register \"test/extra*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zotero-plugin-toolkit": "^5.1.2"
+  },
+  "devDependencies": {
+    "@types/chai": "^5.2.3",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^24.10.0",
+    "@zotero-plugin/eslint-config": "^0.6.9",
+    "chai": "^6.2.1",
+    "eslint": "^9.39.2",
+    "jiti": "^2.6.1",
+    "mocha": "^11.7.5",
+    "prettier": "^3.7.4",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "zotero-plugin-scaffold": "^0.8.6",
+    "zotero-types": "^4.1.2"
+  },
+  "prettier": {
+    "printWidth": 80,
+    "tabWidth": 2,
+    "endOfLine": "lf"
+  }
+}
