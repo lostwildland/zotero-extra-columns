@@ -39,7 +39,7 @@ describe("extraSearchRegistry", function () {
         operators: { contains: true },
       });
       assert.deepInclude(conditions, {
-        name: "extraField:fulltext",
+        name: "extra/fulltext",
         localized: "Extra: Fulltext",
         operators: {
           is: true,
@@ -50,18 +50,57 @@ describe("extraSearchRegistry", function () {
         },
       });
       assert.equal(
-        Zotero.SearchConditions.getLocalizedName("extraField:fulltext"),
+        Zotero.SearchConditions.getLocalizedName("extra/fulltext"),
         "Extra: Fulltext",
       );
       assert.isTrue(
-        Zotero.SearchConditions.hasOperator("extraField:fulltext", "contains"),
+        Zotero.SearchConditions.hasOperator("extra/fulltext", "contains"),
       );
       assert.isFalse(
-        Zotero.SearchConditions.hasOperator(
-          "extraField:fulltext",
-          "isGreaterThan",
-        ),
+        Zotero.SearchConditions.hasOperator("extra/fulltext", "isGreaterThan"),
       );
+    } finally {
+      registry.unpatchAll();
+    }
+  });
+
+  it("displays load-safe stored Extra conditions as Extra field menu conditions", function () {
+    installBaseZoteroMock();
+    const registry = new ExtraSearchRegistry();
+    registry.updateDefinitions([
+      {
+        canonicalKey: "fulltext",
+        label: "Fulltext",
+        rawKeys: ["fulltext"],
+        count: 2,
+      },
+    ]);
+    installAddonMock(registry);
+
+    registry.register();
+    try {
+      const search = new Zotero.Search();
+      search._conditions = {
+        1: {
+          id: 1,
+          condition: "extra",
+          mode: "fulltext",
+          operator: "contains",
+          value: "Raw/",
+          required: false,
+        },
+      };
+
+      assert.deepEqual(search.getConditions(), {
+        1: {
+          id: 1,
+          condition: "extra/fulltext",
+          mode: false,
+          operator: "contains",
+          value: "Raw/",
+          required: false,
+        },
+      });
     } finally {
       registry.unpatchAll();
     }
@@ -168,10 +207,38 @@ describe("extraSearchRegistry", function () {
       registry.unpatchAll();
     }
   });
+
+  it("migrates legacy persisted Extra field conditions to load-safe conditions", async function () {
+    const mock = installSearchZoteroMock();
+    const registry = new ExtraSearchRegistry();
+    installAddonMock(registry);
+
+    registry.register();
+    try {
+      await registry.migratePersistedConditions();
+
+      assert.deepEqual(mock.updates, [
+        {
+          condition: "extra/column",
+          savedSearchID: 8,
+          searchConditionID: 5,
+        },
+      ]);
+      assert.deepEqual(mock.reloads, [{ id: 8, dataTypes: ["conditions"] }]);
+    } finally {
+      registry.unpatchAll();
+    }
+  });
 });
 
 function installBaseZoteroMock() {
   class Search {
+    _conditions: Record<string, unknown> = {};
+
+    getConditions() {
+      return structuredClone(this._conditions);
+    }
+
     hasPostSearchFilter() {
       return false;
     }
@@ -219,8 +286,15 @@ function installSearchZoteroMock() {
     ids: number[];
     options: unknown;
   }> = [];
+  const reloads: Array<{ id: number; dataTypes: string[] }> = [];
+  const updates: Array<{
+    condition: string;
+    savedSearchID: number;
+    searchConditionID: number;
+  }> = [];
 
   class Search {
+    id?: number;
     libraryID: number | null = null;
     _conditions: Record<string, unknown> = {};
     _scope?: Search;
@@ -242,6 +316,10 @@ function installSearchZoteroMock() {
         conditions: structuredClone(this._conditions),
       });
       return [2, 4];
+    }
+
+    getConditions() {
+      return structuredClone(this._conditions);
     }
 
     hasPostSearchFilter() {
@@ -280,6 +358,23 @@ function installSearchZoteroMock() {
       async queryAsync(nextSQL: string, nextParams: unknown[] = []) {
         sql.push(nextSQL);
         params.push([...nextParams]);
+        if (nextSQL.includes("FROM savedSearchConditions")) {
+          return [
+            {
+              savedSearchID: 8,
+              searchConditionID: 5,
+              condition: "extraField:column",
+            },
+          ];
+        }
+        if (nextSQL.startsWith("UPDATE savedSearchConditions")) {
+          updates.push({
+            condition: String(nextParams[0]),
+            savedSearchID: Number(nextParams[1]),
+            searchConditionID: Number(nextParams[2]),
+          });
+          return [];
+        }
         if (nextSQL.startsWith("SELECT I.itemID")) {
           return [
             { itemID: 1, value: "fulltext: Other/A" },
@@ -294,14 +389,26 @@ function installSearchZoteroMock() {
     logError() {
       return undefined;
     },
+    Searches: {
+      get(searchID: number) {
+        return {
+          id: searchID,
+          async reload(dataTypes: string[]) {
+            reloads.push({ id: searchID, dataTypes });
+          },
+        };
+      },
+    },
   };
 
   return {
     idsToTempTableCalls,
     originalSearchCalls,
     params,
+    reloads,
     scopeExecutionPaths,
     sql,
+    updates,
   };
 }
 

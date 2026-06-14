@@ -1,8 +1,8 @@
 import type { ExtraFieldDefinition } from "./extraParser";
 import {
+  decodeStoredExtraSearchCondition,
   decodeExtraSearchCondition,
   encodeExtraSearchCondition,
-  isExtraSearchCondition,
   matchExtraField,
   type ExtraSearchOperator,
 } from "./extraSearchMatcher";
@@ -30,11 +30,13 @@ type SearchInstance = {
   _sqlParams?: unknown;
   _requireData?: (dataType: string) => void;
   libraryID?: number | null;
+  getConditions(): Record<string, SearchCondition>;
   hasPostSearchFilter(): boolean;
   search(asTempTable?: boolean): Promise<number[] | string>;
 };
 
 type SearchPrototype = {
+  getConditions: SearchInstance["getConditions"];
   hasPostSearchFilter: SearchInstance["hasPostSearchFilter"];
   search: SearchInstance["search"];
 };
@@ -61,6 +63,7 @@ export class ExtraSearchRegistry {
   private definitions = new Map<string, ExtraFieldDefinition>();
   private originals?: {
     get: (condition: string) => SearchConditionData | undefined;
+    getConditions: SearchPrototype["getConditions"];
     getLocalizedName: (condition: string) => string;
     getStandardConditions: () => SearchConditionData[];
     hasPostSearchFilter: SearchPrototype["hasPostSearchFilter"];
@@ -87,6 +90,7 @@ export class ExtraSearchRegistry {
     const searchPrototype = (Zotero.Search as SearchConstructor).prototype;
     this.originals = {
       get: searchConditions.get.bind(searchConditions),
+      getConditions: searchPrototype.getConditions,
       getLocalizedName:
         searchConditions.getLocalizedName.bind(searchConditions),
       getStandardConditions:
@@ -137,6 +141,12 @@ export class ExtraSearchRegistry {
     };
 
     const searchWithExtraConditions = this.searchWithExtraConditions.bind(this);
+    const getDisplayConditions = this.getDisplayConditions.bind(this);
+    searchPrototype.getConditions = function patchedGetConditions(
+      this: SearchInstance,
+    ) {
+      return getDisplayConditions(this);
+    };
     const hasExtraSearchConditions = this.hasExtraSearchConditions.bind(this);
     const originalHasPostSearchFilter = this.originals.hasPostSearchFilter;
     searchPrototype.hasPostSearchFilter = function patchedHasPostSearchFilter(
@@ -164,6 +174,8 @@ export class ExtraSearchRegistry {
     Zotero.SearchConditions.getStandardConditions =
       this.originals.getStandardConditions;
     Zotero.SearchConditions.hasOperator = this.originals.hasOperator;
+    (Zotero.Search as SearchConstructor).prototype.getConditions =
+      this.originals.getConditions;
     (Zotero.Search as SearchConstructor).prototype.search =
       this.originals.search;
     (Zotero.Search as SearchConstructor).prototype.hasPostSearchFilter =
@@ -195,7 +207,10 @@ export class ExtraSearchRegistry {
       };
 
       for (const [id, condition] of extraConditions) {
-        const decoded = decodeExtraSearchCondition(condition.condition);
+        const decoded = decodeStoredExtraSearchCondition(
+          condition.condition,
+          condition.mode,
+        );
         if (!decoded) {
           continue;
         }
@@ -272,13 +287,79 @@ export class ExtraSearchRegistry {
     return this.getExtraConditions(search).length > 0;
   }
 
+  private getDisplayConditions(
+    search: SearchInstance,
+  ): Record<string, SearchCondition> {
+    if (!this.originals) {
+      return search.getConditions();
+    }
+
+    const conditions = this.originals.getConditions.call(search);
+    for (const condition of Object.values(conditions)) {
+      const decoded = decodeStoredExtraSearchCondition(
+        condition.condition,
+        condition.mode,
+      );
+      if (!decoded) {
+        continue;
+      }
+
+      condition.condition = encodeExtraSearchCondition(decoded.canonicalKey);
+      condition.mode = false;
+    }
+    return conditions;
+  }
+
   private getExtraConditions(
     search: SearchInstance,
   ): Array<[string, SearchCondition]> {
     search._requireData?.("conditions");
     return Object.entries(search._conditions || {}).filter(([, condition]) =>
-      isExtraSearchCondition(condition.condition),
+      Boolean(
+        decodeStoredExtraSearchCondition(condition.condition, condition.mode),
+      ),
     );
+  }
+
+  async migratePersistedConditions(): Promise<void> {
+    const rows =
+      (await Zotero.DB.queryAsync(
+        "SELECT savedSearchID, searchConditionID, condition " +
+          "FROM savedSearchConditions " +
+          "WHERE condition LIKE ?",
+        ["extraField:%"],
+      )) || [];
+
+    const migratedSearchIDs = new Set<number>();
+    for (const row of rows) {
+      const decoded = decodeExtraSearchCondition(String(row.condition));
+      if (!decoded) {
+        continue;
+      }
+
+      await Zotero.DB.queryAsync(
+        "UPDATE savedSearchConditions SET condition=? " +
+          "WHERE savedSearchID=? AND searchConditionID=?",
+        [
+          encodeExtraSearchCondition(decoded.canonicalKey),
+          Number(row.savedSearchID),
+          Number(row.searchConditionID),
+        ],
+      );
+      migratedSearchIDs.add(Number(row.savedSearchID));
+    }
+
+    for (const searchID of migratedSearchIDs) {
+      const search = Zotero.Searches.get(searchID) as
+        | {
+            reload?: (
+              dataTypes: string[],
+              reloadUnchanged: boolean,
+            ) => Promise<void>;
+          }
+        | undefined;
+      await search?.reload?.(["conditions"], true);
+    }
   }
 }
 

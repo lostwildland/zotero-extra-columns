@@ -1,6 +1,7 @@
 import { canonicalizeExtraKey, parseExtraFields } from "./extraParser";
 
-export const EXTRA_SEARCH_CONDITION_PREFIX = "extraField:";
+export const EXTRA_SEARCH_CONDITION_PREFIX = "extra/";
+export const LEGACY_EXTRA_SEARCH_CONDITION_PREFIX = "extraField:";
 
 export type ExtraSearchOperator =
   | "is"
@@ -23,11 +24,17 @@ export function encodeExtraSearchCondition(canonicalKey: string): string {
 export function decodeExtraSearchCondition(
   condition: string,
 ): ExtraSearchConditionID | null {
-  if (!condition.startsWith(EXTRA_SEARCH_CONDITION_PREFIX)) {
+  const prefix = condition.startsWith(EXTRA_SEARCH_CONDITION_PREFIX)
+    ? EXTRA_SEARCH_CONDITION_PREFIX
+    : condition.startsWith(LEGACY_EXTRA_SEARCH_CONDITION_PREFIX)
+      ? LEGACY_EXTRA_SEARCH_CONDITION_PREFIX
+      : null;
+
+  if (!prefix) {
     return null;
   }
 
-  const encodedKey = condition.slice(EXTRA_SEARCH_CONDITION_PREFIX.length);
+  const encodedKey = condition.slice(prefix.length);
   if (!encodedKey) {
     return null;
   }
@@ -42,6 +49,22 @@ export function decodeExtraSearchCondition(
 
 export function isExtraSearchCondition(condition: string): boolean {
   return Boolean(decodeExtraSearchCondition(condition));
+}
+
+export function decodeStoredExtraSearchCondition(
+  condition: string,
+  mode?: string | false,
+): ExtraSearchConditionID | null {
+  const decoded = decodeExtraSearchCondition(condition);
+  if (decoded) {
+    return decoded;
+  }
+
+  if (condition !== "extra" || typeof mode !== "string" || !mode) {
+    return null;
+  }
+
+  return decodeExtraSearchCondition(encodeExtraSearchCondition(mode));
 }
 
 export function matchExtraField(

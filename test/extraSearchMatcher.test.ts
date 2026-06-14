@@ -15,23 +15,30 @@ describe("extraSearchMatcher", function () {
       ),
       [
         {
-          condition: "extraField:fulltext",
+          condition: "extra/fulltext",
           canonicalKey: "fulltext",
         },
         {
-          condition: "extraField:quality-score",
+          condition: "extra/quality-score",
           canonicalKey: "quality-score",
         },
         {
-          condition: "extraField:title-translation",
+          condition: "extra/title-translation",
           canonicalKey: "title-translation",
         },
         {
-          condition: "extraField:a-b%2Fc",
+          condition: "extra/a-b%2Fc",
           canonicalKey: "a-b/c",
         },
       ],
     );
+  });
+
+  it("decodes legacy Extra field search condition IDs", function () {
+    assert.deepEqual(decodeExtraSearchCondition("extraField:fulltext"), {
+      condition: "extraField:fulltext",
+      canonicalKey: "fulltext",
+    });
   });
 
   it("matches positive text operators against parsed Extra fields", function () {

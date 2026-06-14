@@ -39,6 +39,7 @@ async function onStartup() {
 
   try {
     searchRegistry.register();
+    await searchRegistry.migratePersistedConditions();
     section.register();
     prepareMainWindows(columnPickerOrganizer);
 
