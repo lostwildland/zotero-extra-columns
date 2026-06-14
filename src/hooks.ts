@@ -4,6 +4,7 @@ import { ExtraCleaner } from "./extraCleaner";
 import { ExtraColumnRegistry } from "./extraColumnRegistry";
 import { ExtraMenu } from "./extraMenu";
 import type { ExtraFieldDefinition } from "./extraParser";
+import { ExtraSearchRegistry } from "./extraSearchRegistry";
 import { ExtraSection } from "./extraSection";
 
 const ITEM_EVENTS = new Set(["add", "modify", "delete", "trash", "untrash"]);
@@ -26,15 +27,18 @@ async function onStartup() {
   );
   menuRef.current = menu;
   const columnPickerOrganizer = new ColumnPickerOrganizer(registry);
+  const searchRegistry = new ExtraSearchRegistry();
   const section = new ExtraSection(config.addonID, config.addonRef);
 
   addon.data.cleaner = cleaner;
   addon.data.columnPickerOrganizer = columnPickerOrganizer;
   addon.data.menu = menu;
   addon.data.registry = registry;
+  addon.data.searchRegistry = searchRegistry;
   addon.data.section = section;
 
   try {
+    searchRegistry.register();
     section.register();
     prepareMainWindows(columnPickerOrganizer);
 
@@ -45,7 +49,7 @@ async function onStartup() {
             return;
           }
           registry.scheduleScan(rescanDelayMS, (definitions) =>
-            menu.register(definitions),
+            applyExtraFieldDefinitions(definitions, menu, searchRegistry),
           );
           section.scheduleRefresh(rescanDelayMS);
           Zotero.ItemTreeManager.refreshColumns();
@@ -55,7 +59,9 @@ async function onStartup() {
       config.addonRef,
     );
 
-    refreshExtraFields(registry, menu).catch(recordStartupError);
+    refreshExtraFields(registry, menu, searchRegistry).catch(
+      recordStartupError,
+    );
   } catch (error) {
     recordStartupError(error);
   } finally {
@@ -79,6 +85,7 @@ function onShutdown(): void {
 
   addon.data.menu?.unregisterAll();
   addon.data.columnPickerOrganizer?.unpatchAll();
+  addon.data.searchRegistry?.unpatchAll();
   addon.data.section?.unregister();
   addon.data.registry?.unregisterAll();
   addon.data.alive = false;
@@ -89,10 +96,20 @@ function onShutdown(): void {
 async function refreshExtraFields(
   registry: ExtraColumnRegistry,
   menu: ExtraMenu,
+  searchRegistry?: ExtraSearchRegistry,
 ): Promise<ExtraFieldDefinition[]> {
   const definitions = await registry.scanAndRegister();
-  menu.register(definitions);
+  applyExtraFieldDefinitions(definitions, menu, searchRegistry);
   return definitions;
+}
+
+function applyExtraFieldDefinitions(
+  definitions: ExtraFieldDefinition[],
+  menu: ExtraMenu,
+  searchRegistry?: ExtraSearchRegistry,
+): void {
+  menu.register(definitions);
+  searchRegistry?.updateDefinitions(definitions);
 }
 
 function prepareMainWindows(

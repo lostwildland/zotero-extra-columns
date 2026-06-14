@@ -54,14 +54,15 @@ titleTranslation: 在人工智能饱和的市场中，人类出处验证应被�
 
 ### 清理 Extra 字段
 
-插件提供全库清理功能，可以一键删除某一个 `Extra` 属性在所有条目中的对应行。
+插件提供清理功能，可以一键删除某一个 `Extra` 属性的对应行。可以清理全库，也可以只清理当前选中的条目。
 
 入口：
 
 - `Tools -> Extra Columns -> Clean Extra Field`
-- 条目右键菜单：`Extra Columns -> Clean Extra Field`
+- 条目右键菜单：`Extra Columns -> Clean Selected Extra Field`
+- 条目右键菜单：`Extra Columns -> Clean Extra Field (All Items)`
 
-清理菜单会列出当前库中已经发现的 `Extra` 字段。括号中的数字按实际条目行数统计，也就是当前会被删除的字段行数。点击某个字段后，插件会先显示确认框，说明将影响多少个条目、删除多少行。确认后才会真正修改 Zotero 数据。
+全库清理菜单会列出当前库中已经发现的 `Extra` 字段。选中条目清理菜单只列出当前选中条目里实际出现的字段。括号中的数字按实际条目行数统计，也就是当前会被删除的字段行数；在选中条目入口中，这个数字只来自当前选择。点击某个字段后，插件会先显示确认框，说明将影响多少个条目、删除多少行。确认后才会真正修改 Zotero 数据。
 
 例如选择清理 `arXiv` 时，下面这些行会被删除：
 
@@ -220,7 +221,7 @@ model: GPT-5
 
 插件的列显示和右侧详情区块只读取 `Extra` 栏，不会改写条目内容，也不会把 `Extra` 中的值移动到 Zotero 原生字段。
 
-只有 `Clean Extra Field` 是写操作。它会在执行前弹出确认框，并只删除被选中字段对应的整行。
+只有 `Clean Extra Field` 和 `Clean Selected Extra Field` 是写操作。它们会在执行前弹出确认框，并只删除被选中字段对应的整行。
 
 ### 使用 Zotero 官方插件 API
 
@@ -243,7 +244,6 @@ Zotero 内部有 `extractExtraFields()` 一类工具，但它主要面向 Zotero
 - 不解析多行 continuation value。
 - 条目列表列中显示纯文本；可点击链接只在右侧 `Extra 字段` 区块中提供。
 - 字段只有在库中至少出现过一次后才会出现在列菜单中。
-- `Clean Extra Field` 是全库操作，不只作用于当前选中的条目；执行前会显示影响范围确认。
 - 如果其他插件也注册了同名列，它们不会被移动到 `More Columns -> Extra`；这个子菜单只整理本插件生成的列。
 
 ## 开发

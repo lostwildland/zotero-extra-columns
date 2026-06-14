@@ -1,11 +1,25 @@
-import type { ExtraCleaner, ExtraCleanProgress } from "./extraCleaner";
-import type { ExtraFieldDefinition } from "./extraParser";
+import type {
+  ExtraCleaner,
+  ExtraCleanProgress,
+  ExtraCleanScope,
+} from "./extraCleaner";
+import {
+  discoverExtraFieldDefinitions,
+  type ExtraFieldDefinition,
+} from "./extraParser";
 
 const TOOL_MENU_ID = "tools-extra-columns";
 const ITEM_CONTEXT_MENU_ID = "item-context-extra-columns";
 const MENU_ICON = "extra-columns-menu.svg";
 
 type AnyMenuContext = _ZoteroTypes.MenuManager.MenuContext;
+type CleanMode = "all" | "selected";
+
+interface CleanFieldOptions {
+  mode: CleanMode;
+  scope?: ExtraCleanScope;
+  selectionCount?: number;
+}
 
 export class ExtraMenu {
   private registeredMenuIDs: string[] = [];
@@ -49,6 +63,7 @@ export class ExtraMenu {
     target: _ZoteroTypes.MenuManager.ValidTarget;
     definitions: ExtraFieldDefinition[];
   }): void {
+    const isItemContext = options.target === "main/library/item";
     const registeredMenuID = Zotero.MenuManager.registerMenu({
       menuID: options.menuID,
       pluginID: this.pluginID,
@@ -60,19 +75,46 @@ export class ExtraMenu {
           onShowing: (_event, context) => {
             setMenuLabel(context, menuText("root"));
             setMenuIcon(context, this.menuIconURL);
-            if (options.target === "main/library/item") {
+            if (isItemContext) {
               context.setVisible(Boolean(context.items?.length));
             }
           },
-          menus: [
-            {
-              menuType: "submenu",
-              onShowing: (_event, context) => {
-                setMenuLabel(context, menuText("clean"));
-              },
-              menus: this.createCleanFieldMenus(options.definitions),
-            },
-          ],
+          menus: isItemContext
+            ? [
+                {
+                  menuType: "submenu",
+                  onShowing: (_event, context) => {
+                    setMenuLabel(context, menuText("cleanSelected"));
+                    context.setVisible(Boolean(context.items?.length));
+                  },
+                  menus: this.createCleanFieldMenus({
+                    definitions: options.definitions,
+                    mode: "selected",
+                  }),
+                },
+                {
+                  menuType: "submenu",
+                  onShowing: (_event, context) => {
+                    setMenuLabel(context, menuText("cleanAllContext"));
+                  },
+                  menus: this.createCleanFieldMenus({
+                    definitions: options.definitions,
+                    mode: "all",
+                  }),
+                },
+              ]
+            : [
+                {
+                  menuType: "submenu",
+                  onShowing: (_event, context) => {
+                    setMenuLabel(context, menuText("cleanAll"));
+                  },
+                  menus: this.createCleanFieldMenus({
+                    definitions: options.definitions,
+                    mode: "all",
+                  }),
+                },
+              ],
         },
       ],
     });
@@ -82,31 +124,59 @@ export class ExtraMenu {
     }
   }
 
-  private createCleanFieldMenus(
-    definitions: ExtraFieldDefinition[],
-  ): _ZoteroTypes.MenuManager.MenuData[] {
+  private createCleanFieldMenus(options: {
+    definitions: ExtraFieldDefinition[];
+    mode: CleanMode;
+  }): _ZoteroTypes.MenuManager.MenuData[] {
+    const { definitions, mode } = options;
     if (definitions.length === 0) {
       return [
         {
           menuType: "menuitem",
           onShowing: (_event, context) => {
-            setMenuLabel(context, menuText("noFields"));
+            setMenuLabel(
+              context,
+              menuText(mode === "selected" ? "noSelectedFields" : "noFields"),
+            );
             context.setEnabled(false);
           },
         },
       ];
     }
 
-    return definitions.map((definition) => ({
-      menuType: "menuitem",
-      onShowing: (_event, context) => {
+    const fieldMenus = definitions.map((definition) => ({
+      menuType: "menuitem" as const,
+      onShowing: (_event: Event, context: AnyMenuContext) => {
+        const scopedDefinition =
+          mode === "selected"
+            ? findSelectedDefinition(context, definition.canonicalKey)
+            : definition;
+
+        context.setVisible(Boolean(scopedDefinition));
+        context.setEnabled(Boolean(scopedDefinition));
         setMenuLabel(
           context,
-          menuText("cleanItem", definition.label, definition.count),
+          menuText(
+            "cleanItem",
+            scopedDefinition?.label || definition.label,
+            scopedDefinition?.count || definition.count,
+          ),
         );
       },
-      onCommand: (_event, context) => {
-        this.cleanField(definition, context).catch((error) => {
+      onCommand: (_event: Event, context: AnyMenuContext) => {
+        const scopedDefinition =
+          mode === "selected"
+            ? findSelectedDefinition(context, definition.canonicalKey)
+            : definition;
+        if (!scopedDefinition) {
+          return;
+        }
+
+        this.cleanField(
+          scopedDefinition,
+          context,
+          cleanOptions(context, mode),
+        ).catch((error) => {
           Zotero.logError(
             error instanceof Error ? error : new Error(String(error)),
           );
@@ -114,27 +184,60 @@ export class ExtraMenu {
         });
       },
     }));
+
+    if (mode !== "selected") {
+      return fieldMenus;
+    }
+
+    return [
+      {
+        menuType: "menuitem",
+        onShowing: (_event, context) => {
+          setMenuLabel(context, menuText("noSelectedFields"));
+          context.setEnabled(false);
+          context.setVisible(getSelectedDefinitions(context).length === 0);
+        },
+      },
+      ...fieldMenus,
+    ];
   }
 
   private async cleanField(
     definition: ExtraFieldDefinition,
     context: AnyMenuContext,
+    options: CleanFieldOptions,
   ): Promise<void> {
-    const preview = await this.cleaner.preview(definition.canonicalKey);
+    const preview = await this.cleaner.preview(
+      definition.canonicalKey,
+      options.scope,
+    );
     if (preview.linesRemoved === 0) {
-      alertInfo(context, message("nothingToClean", definition.label));
+      alertInfo(
+        context,
+        options.mode === "selected"
+          ? message("nothingToCleanSelected", definition.label)
+          : message("nothingToClean", definition.label),
+      );
       await this.refreshFields();
       return;
     }
 
     const confirmed = confirmAction(
       context,
-      message(
-        "confirmClean",
-        definition.label,
-        preview.itemsChanged,
-        preview.linesRemoved,
-      ),
+      options.mode === "selected"
+        ? message(
+            "confirmCleanSelected",
+            definition.label,
+            options.selectionCount || 0,
+            preview.itemsChanged,
+            preview.linesRemoved,
+          )
+        : message(
+            "confirmClean",
+            definition.label,
+            preview.itemsChanged,
+            preview.linesRemoved,
+          ),
     );
     if (!confirmed) {
       return;
@@ -148,7 +251,7 @@ export class ExtraMenu {
     );
 
     const result = await this.cleaner
-      .clean(definition.canonicalKey, progressWindow.update)
+      .clean(definition.canonicalKey, options.scope, progressWindow.update)
       .catch((error) => {
         progressWindow.fail(errorMessage(error));
         throw error;
@@ -159,13 +262,22 @@ export class ExtraMenu {
 
     alertInfo(
       context,
-      message(
-        "cleanDone",
-        definition.label,
-        result.itemsChanged,
-        result.linesRemoved,
-        result.failedItems.length,
-      ),
+      options.mode === "selected"
+        ? message(
+            "cleanSelectedDone",
+            definition.label,
+            options.selectionCount || 0,
+            result.itemsChanged,
+            result.linesRemoved,
+            result.failedItems.length,
+          )
+        : message(
+            "cleanDone",
+            definition.label,
+            result.itemsChanged,
+            result.linesRemoved,
+            result.failedItems.length,
+          ),
     );
   }
 }
@@ -230,18 +342,37 @@ function setMenuIcon(context: AnyMenuContext, iconURL: string): void {
   context.menuElem.style.listStyleImage = `url("${iconURL}")`;
 }
 
-function menuText(key: "root" | "clean" | "noFields"): string;
+function menuText(
+  key:
+    | "root"
+    | "cleanAll"
+    | "cleanAllContext"
+    | "cleanSelected"
+    | "noFields"
+    | "noSelectedFields",
+): string;
 function menuText(key: "cleanItem", label: string, count: number): string;
 function menuText(key: string, label?: string, count?: number): string {
   const zh = isChineseLocale();
   if (key === "root") {
     return "Extra Columns";
   }
-  if (key === "clean") {
+  if (key === "cleanAll") {
     return zh ? "清理 Extra 字段" : "Clean Extra Field";
+  }
+  if (key === "cleanAllContext") {
+    return zh ? "清理所有条目的 Extra 字段" : "Clean Extra Field (All Items)";
+  }
+  if (key === "cleanSelected") {
+    return zh ? "清理选中条目的 Extra 字段" : "Clean Selected Extra Field";
   }
   if (key === "noFields") {
     return zh ? "没有可清理字段" : "No Extra fields found";
+  }
+  if (key === "noSelectedFields") {
+    return zh
+      ? "选中条目没有可清理字段"
+      : "No Extra fields found in selected items";
   }
   return zh ? `删除 ${label}（${count}）` : `Remove ${label} (${count})`;
 }
@@ -271,6 +402,7 @@ function errorMessage(error: unknown): string {
 }
 
 function message(key: "nothingToClean", label: string): string;
+function message(key: "nothingToCleanSelected", label: string): string;
 function message(key: "progressHeadline", label: string): string;
 function message(key: "progressLine", processed: number, total: number): string;
 function message(key: "progressDone"): string;
@@ -283,8 +415,23 @@ function message(
   linesRemoved: number,
 ): string;
 function message(
+  key: "confirmCleanSelected",
+  label: string,
+  selectionCount: number,
+  itemsChanged: number,
+  linesRemoved: number,
+): string;
+function message(
   key: "cleanDone",
   label: string,
+  itemsChanged: number,
+  linesRemoved: number,
+  failedItems: number,
+): string;
+function message(
+  key: "cleanSelectedDone",
+  label: string,
+  selectionCount: number,
   itemsChanged: number,
   linesRemoved: number,
   failedItems: number,
@@ -296,6 +443,11 @@ function message(key: string, ...args: Array<number | string>): string {
     return zh
       ? `没有找到可清理的「${args[0]}」字段。`
       : `No removable "${args[0]}" fields were found.`;
+  }
+  if (key === "nothingToCleanSelected") {
+    return zh
+      ? `选中条目中没有找到可清理的「${args[0]}」字段。`
+      : `No removable "${args[0]}" fields were found in selected items.`;
   }
   if (key === "progressHeadline") {
     return zh ? `正在清理「${args[0]}」` : `Cleaning "${args[0]}"`;
@@ -321,6 +473,11 @@ function message(key: string, ...args: Array<number | string>): string {
       ? `确定要从所有条目的 Extra 栏删除「${args[0]}」吗？\n\n将影响 ${args[1]} 个条目，删除 ${args[2]} 行。\n此操作会直接修改 Zotero 数据，请确认已同步或备份。`
       : `Remove "${args[0]}" from the Extra field of all items?\n\nThis will affect ${args[1]} items and remove ${args[2]} lines.\nThis directly modifies Zotero data, so make sure your library is synced or backed up.`;
   }
+  if (key === "confirmCleanSelected") {
+    return zh
+      ? `确定要从当前选中的 ${args[1]} 个条目的 Extra 栏删除「${args[0]}」吗？\n\n将实际影响 ${args[2]} 个条目，删除 ${args[3]} 行。未选中的条目不会被修改。\n此操作会直接修改 Zotero 数据，请确认已同步或备份。`
+      : `Remove "${args[0]}" from the Extra field of the ${args[1]} selected items?\n\nThis will affect ${args[2]} selected items and remove ${args[3]} lines. Unselected items will not be modified.\nThis directly modifies Zotero data, so make sure your library is synced or backed up.`;
+  }
   if (key === "cleanDone") {
     const failedItems = Number(args[3]);
     const failedSuffix = failedItems
@@ -332,9 +489,64 @@ function message(key: string, ...args: Array<number | string>): string {
       ? `已清理「${args[0]}」。\n\n修改 ${args[1]} 个条目，删除 ${args[2]} 行。${failedSuffix}`
       : `Cleaned "${args[0]}".\n\nUpdated ${args[1]} items and removed ${args[2]} lines.${failedSuffix}`;
   }
+  if (key === "cleanSelectedDone") {
+    const failedItems = Number(args[4]);
+    const failedSuffix = failedItems
+      ? zh
+        ? `\n${failedItems} 个条目清理失败，详情见 Zotero 日志。`
+        : `\n${failedItems} items failed. Check the Zotero log for details.`
+      : "";
+    return zh
+      ? `已清理选中条目的「${args[0]}」。\n\n选中 ${args[1]} 个条目，修改 ${args[2]} 个条目，删除 ${args[3]} 行。${failedSuffix}`
+      : `Cleaned "${args[0]}" from selected items.\n\nSelected ${args[1]} items, updated ${args[2]} items, and removed ${args[3]} lines.${failedSuffix}`;
+  }
   return zh
     ? `清理 Extra 字段时出错：${args[0]}`
     : `Failed to clean Extra field: ${args[0]}`;
+}
+
+function cleanOptions(
+  context: AnyMenuContext,
+  mode: CleanMode,
+): CleanFieldOptions {
+  if (mode === "all") {
+    return { mode };
+  }
+
+  const selectedItems = getSelectedItems(context);
+  return {
+    mode,
+    scope: {
+      itemIDs: selectedItems.map((item) => item.id),
+    },
+    selectionCount: selectedItems.length,
+  };
+}
+
+function findSelectedDefinition(
+  context: AnyMenuContext,
+  canonicalKey: string,
+): ExtraFieldDefinition | undefined {
+  return getSelectedDefinitions(context).find(
+    (definition) => definition.canonicalKey === canonicalKey,
+  );
+}
+
+function getSelectedDefinitions(
+  context: AnyMenuContext,
+): ExtraFieldDefinition[] {
+  return discoverExtraFieldDefinitions(
+    getSelectedItems(context).map(getItemExtra),
+  );
+}
+
+function getSelectedItems(context: AnyMenuContext): Zotero.Item[] {
+  return Array.isArray(context.items) ? context.items : [];
+}
+
+function getItemExtra(item: Zotero.Item): string {
+  const extra = item.getField("extra");
+  return typeof extra === "string" ? extra : "";
 }
 
 function isChineseLocale(): boolean {

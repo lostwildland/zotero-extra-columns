@@ -3,6 +3,7 @@ import type { ColumnPickerOrganizer } from "./columnPickerOrganizer";
 import type { ExtraCleaner } from "./extraCleaner";
 import type { ExtraColumnRegistry } from "./extraColumnRegistry";
 import type { ExtraMenu } from "./extraMenu";
+import type { ExtraSearchRegistry } from "./extraSearchRegistry";
 import type { ExtraSection } from "./extraSection";
 import hooks from "./hooks";
 
@@ -17,6 +18,7 @@ class Addon {
     menu?: ExtraMenu;
     notifierID?: string;
     registry?: ExtraColumnRegistry;
+    searchRegistry?: ExtraSearchRegistry;
     section?: ExtraSection;
     startupError?: string;
   };
